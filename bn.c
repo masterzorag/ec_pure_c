@@ -4,14 +4,10 @@
 //
 // further edited by masterzorag@gmail.com, 2014
 
-//#include "types.h"
 typedef unsigned char u8;
-typedef char s8;
 typedef unsigned int u32;
-typedef unsigned long long int u64;
 
-
-static void bn_zero(u8 *d, const u32 n){				// memset(d, 0, n);
+static void bn_zero(u8 *d, const u32 n){		// memset(d, 0, n);
 	for(u32 i = 0; i < n; i++)
 		d[i] = 0;
 }
@@ -44,8 +40,7 @@ static u8 bn_add_1(u8 *d, const u8 *a, const u8 *b, const u32 n)
 	return c;
 }
 
-static u8 bn_sub_1(u8 *d, const u8 *a, const u8 *b, const u32 n)
-{
+static u8 bn_sub_1(u8 *d, const u8 *a, const u8 *b, const u32 n){
 	u32 i, dig;
 	u8 c = 1;
 	for (i = n - 1; i < n; i--) {
@@ -167,4 +162,11 @@ void bn_mon_inv(u8 *d, const u8 *a, const u8 *N, const u32 n){
 	s[n-1] = 2;
 	bn_sub_1(t, N, s, n);
 	bn_mon_exp(d, a, N, n, t, n);
+}
+
+int elt_is_zero(u8 *d){
+	for(u32 i = 0; i < 20; i++)
+		if (d[i] != 0) return 0;
+
+	return 1;
 }

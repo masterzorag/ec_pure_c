@@ -27,10 +27,17 @@ struct point{
 	u8 y[20];
 };
 
-static u8 ec_p[20];
-static u8 ec_a[20];
-static u8 ec_b[20];
-static struct point ec_G;
+struct Elliptic_Curve {
+	u8 p[20];
+	u8 a[20];
+	u8 b[20];
+	struct point G;
+};
+
+static struct Elliptic_Curve EC;
+
+typedef char s8;
+typedef unsigned long long int u64;
 
 u64 _x_to_u64(const s8 *hex){
 	u64 t = 0, res = 0;
@@ -78,21 +85,10 @@ void bn_print(const char *name, const u8 *a, const u32 n){
 	printf("\n");
 }
 
-int elt_is_zero(u8 *d){
-	for(u32 i = 0; i < 20; i++)
-		if (d[i] != 0) return 0;
-
-	return 1;
-}
-
 void elt_inv(u8 *d, u8 *a){
 	u8 s[20];
 	bn_copy(s, a, 20);
-	bn_mon_inv(d, s, ec_p, 20);
-}
-
-void point_zero(struct point *p){
-	bn_zero(p->x, 20); bn_zero(p->y, 20);
+	bn_mon_inv(d, s, EC.p, 20);
 }
 
 int point_is_zero(struct point *p){
@@ -111,37 +107,37 @@ void point_double(struct point *r, const struct point *p)
 	ry = r->y;
 
 	if(elt_is_zero(py)){
-		bn_zero(r->x, 20); bn_zero(r->y, 20);
+		bn_zero((u8 *)r, 40);
 		return;
 	}
 
 // t = px*px					elt_square(t, px);	
-	bn_mon_mul(t, px, px, ec_p, 20);
+	bn_mon_mul(t, px, px, EC.p, 20);
 // s = 2*px*px					elt_add(s, t, t);
-	bn_add(s, t, t, ec_p, 20);
+	bn_add(s, t, t, EC.p, 20);
 // s = 3*px*px					elt_add(s, s, t);
-	bn_add(s, s, t, ec_p, 20);
+	bn_add(s, s, t, EC.p, 20);
 // s = 3*px*px + a				elt_add(s, s, ec_a);	// ec_a is needed here, is const!
-	bn_add(s, s, ec_a, ec_p, 20);
+	bn_add(s, s, EC.a, EC.p, 20);
 // t = 2*py					elt_add(t, py, py);
-	bn_add(t, py, py, ec_p, 20);
+	bn_add(t, py, py, EC.p, 20);
 // t = 1/(2*py)					
 	elt_inv(t, t);
 // s = (3*px*px+a)/(2*py)			elt_mul(s, s, t);
-	bn_mon_mul(s, s, t, ec_p, 20);
+	bn_mon_mul(s, s, t, EC.p, 20);
 // rx = s*s					elt_square(rx, s);
-	bn_mon_mul(rx, s, s, ec_p, 20);
+	bn_mon_mul(rx, s, s, EC.p, 20);
 // t = 2*px					elt_add(t, px, px);
-	bn_add(t, px, px, ec_p, 20);
+	bn_add(t, px, px, EC.p, 20);
 // rx = s*s - 2*px				elt_sub(rx, rx, t);
-	bn_sub(rx, rx, t, ec_p, 20);
+	bn_sub(rx, rx, t, EC.p, 20);
+	
 // t = -(rx-px)					elt_sub(t, px, rx);
-	bn_sub(t, px, rx, ec_p, 20);
-
+	bn_sub(t, px, rx, EC.p, 20);
 // ry = -s*(rx-px)				elt_mul(ry, s, t);
-	bn_mon_mul(ry, s, t, ec_p, 20);
+	bn_mon_mul(ry, s, t, EC.p, 20);
 // ry = -s*(rx-px) - py				elt_sub(ry, ry, py);
-	bn_sub(ry, ry, py, ec_p, 20);
+	bn_sub(ry, ry, py, EC.p, 20);
 }
 
 void point_add(struct point *r, const struct point *p, const struct point *q)
@@ -158,22 +154,22 @@ void point_add(struct point *r, const struct point *p, const struct point *q)
 	ry = r->y;
 
 	if(point_is_zero(&pp)){
-		bn_copy(rx, qx, 20); bn_copy(ry, qy, 20); return;	}
+		bn_copy(rx, qx, 20); bn_copy(ry, qy, 20); return; }
 
 	if(point_is_zero(&qq)){
 		bn_copy(rx, px, 20); bn_copy(ry, py, 20); return; }
 
 // u = qx-px					elt_sub(u, qx, px);
-	bn_sub(u, qx, px, ec_p, 20);
+	bn_sub(u, qx, px, EC.p, 20);
 
 	if(elt_is_zero(u)){
-//	u = qy-py				elt_sub(u, qy, py);
-		bn_sub(u, qy, py, ec_p, 20);
+// u = qy-py					elt_sub(u, qy, py);
+		bn_sub(u, qy, py, EC.p, 20);
 		
 		if(elt_is_zero(u))
 			point_double(r, &pp);
 		else
-			point_zero(r);
+			bn_zero((u8 *)r, 40);	//point_zero(r);
 
 		return;
 	}
@@ -181,22 +177,22 @@ void point_add(struct point *r, const struct point *p, const struct point *q)
 // t = 1/(qx-px)				
 	elt_inv(t, u);
 // u = qy-py					elt_sub(u, qy, py);
-	bn_sub(u, qy, py, ec_p, 20);
+	bn_sub(u, qy, py, EC.p, 20);
 // s = (qy-py)/(qx-px)				elt_mul(s, t, u);
-	bn_mon_mul(s, t, u, ec_p, 20);
+	bn_mon_mul(s, t, u, EC.p, 20);
 // rx = s*s					elt_square(rx, s); -> elt_mul(d, a, a);
-	bn_mon_mul(rx, s, s, ec_p, 20);
+	bn_mon_mul(rx, s, s, EC.p, 20);
 // t = px+qx					elt_add(t, px, qx);
-	bn_add(t, px, qx, ec_p, 20);
+	bn_add(t, px, qx, EC.p, 20);
 // rx = s*s - (px+qx)				elt_sub(rx, rx, t);
-	bn_sub(rx, rx, t, ec_p, 20);
+	bn_sub(rx, rx, t, EC.p, 20);
 
 // t = -(rx-px)					elt_sub(t, px, rx);
-	bn_sub(t, px, rx, ec_p, 20);
+	bn_sub(t, px, rx, EC.p, 20);
 // ry = -s*(rx-px)				elt_mul(ry, s, t);
-	bn_mon_mul(ry, s, t, ec_p, 20);
+	bn_mon_mul(ry, s, t, EC.p, 20);
 // ry = -s*(rx-px) - py				elt_sub(ry, ry, py);
-	bn_sub(ry, ry, py, ec_p, 20);
+	bn_sub(ry, ry, py, EC.p, 20);
 }	//out rx, ry
 
 void point_mul(struct point *d, const u8 *a, const struct point *b)
@@ -204,7 +200,8 @@ void point_mul(struct point *d, const u8 *a, const struct point *b)
 	u32 i;
 	u8 mask;
 
-	point_zero(d);	 //memset 0
+	//point_zero(d);	 //memset 0
+	bn_zero((u8 *)d, 40);
 
 	for(i = 0; i < 21; i++)
 		for(mask = 0x80; mask != 0; mask >>= 1){
@@ -215,13 +212,13 @@ void point_mul(struct point *d, const u8 *a, const struct point *b)
 }
 
 void point_to_mon(struct point *p){
-	bn_to_mon(p->x, ec_p, 20);
-	bn_to_mon(p->y, ec_p, 20);
+	bn_to_mon(p->x, EC.p, 20);
+	bn_to_mon(p->y, EC.p, 20);
 }
 
 void point_from_mon(struct point *p){
-	bn_from_mon(p->x, ec_p, 20);
-	bn_from_mon(p->y, ec_p, 20);
+	bn_from_mon(p->x, EC.p, 20);
+	bn_from_mon(p->y, EC.p, 20);
 }
 
 
@@ -296,23 +293,16 @@ int main(int argc, char *argv[])
 	}
 	
 	// fill global curve variables from allocated buffers and release them	
-	memcpy(ec_p, p, 20);		free(p);
-	memcpy(ec_a, a, 20);		free(a);
-	memcpy(ec_b, b, 20);		free(b);
-	memcpy(ec_G.x, Gx, 20);		free(Gx);
-	memcpy(ec_G.y, Gy, 20);		free(Gy);	
-/*
-	printf("domain_parameters\n");
-	bn_print("p", ec_p, 20);
-	bn_print("a", ec_a, 20);
-	bn_print("b", ec_b, 20);	//not involved into pub computation?!
-	bn_print("Gx", ec_G.x, 20);
-	bn_print("Gy", ec_G.y, 20);
-*/	
+	memcpy(EC.p, p, 20);		free(p);
+	memcpy(EC.a, a, 20);		free(a);
+	memcpy(EC.b, b, 20);		free(b);
+	memcpy(EC.G.x, Gx, 20);		free(Gx);
+	memcpy(EC.G.y, Gy, 20);		free(Gy);
+	
 	// after this preparation domain_parameters remains constant!
-	bn_to_mon(ec_a, ec_p, 20);
-	bn_to_mon(ec_b, ec_p, 20);
-	point_to_mon(&ec_G);
+	bn_to_mon(EC.a, EC.p, 20);
+	bn_to_mon(EC.b, EC.p, 20);	//b used here
+	point_to_mon(&EC.G);
 
 	// known/target pub stuff: bn_print("pub", Q, 40);
 
@@ -327,7 +317,7 @@ int main(int argc, char *argv[])
 	
 	struct point P;
 	/*	P = k x G */	
-	point_mul(&P, k, &ec_G);
+	point_mul(&P, k, &EC.G);
 	
 	bn_print("k", k, 21);	
 	free(k);
