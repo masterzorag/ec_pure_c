@@ -1,37 +1,65 @@
 // Copyright 2007,2008,2010  Segher Boessenkool  <segher@kernel.crashing.org>
 // Licensed under the terms of the GNU GPL, version 2
 // http://www.gnu.org/licenses/old-licenses/gpl-2.0.txt
-//
-// further edited by masterzorag@gmail.com, 2014
+
+/* further edited by masterzorag@gmail.com, 2014 */
 
 typedef unsigned char u8;
 typedef unsigned int u32;
 
-static void bn_zero(u8 *d, const u32 n){		// memset(d, 0, n);
-	for(u32 i = 0; i < n; i++)
+/*	all those functions iterates 20 (or 20 * 2) times, so:
+	- use u8, then hardcode
+	- does not needs optional variables
+	
+	bn_zero(u8 *d, const u32 n)
+	bn_copy(u8 *d, const u8 *a, const u32 n)
+	bn_compare(const u8 *a, const u8 *b, const u32 n)
+	...
+	bn_reduce(u8 *d, const u8 *N, const u32 n)
+	bn_add(u8 *d, u8 *a, const u8 *b, const u8 *N, const u32 n)
+	bn_sub(u8 *d, u8 *a, const u8 *b, const u8 *N, const u32 n)
+*/
+static int elt_is_zero(const u8 *d){
+	for(u8 i = 0; i < 20; i++)
+		if (d[i] != 0) return 0;
+
+	return 1;
+}
+
+/* a _kernel user_zerofill sample */
+static void bn_zero(u8 *d, const u32 n){
+	for(u8 i = 0; i < n; i++)
 		d[i] = 0;
 }
 
-void bn_copy(u8 *d, const u8 *a, const u32 n){		// memcpy(d, a, n);
-	for(u32 i = 0; i < n; i++)
+/* a _kernel user_memcpy sample */
+static void bn_copy(u8 *d, const u8 *a, const u32 n){
+	for(u8 i = 0; i < n; i++)
 		d[i] = a[i];
 }
 
-int bn_compare(const u8 *a, const u8 *b, const u32 n){
-	for(u32 i = 0; i < n; i++){
-		if(a[i] < b[i])
-			return -1;
-		if(a[i] > b[i])
-			return 1;
+/* a _kernel user_memcmp sample */
+static int bn_compare(const u8 *a, const u8 *b, const u32 n){
+	for(u8 i = 0; i < n; i++){
+		if(a[i] < b[i]) return -1;
+		if(a[i] > b[i]) return 1;
 	}
 	return 0;
 }
 
-static u8 bn_add_1(u8 *d, const u8 *a, const u8 *b, const u32 n)
-{
-	u32 i, dig;
+/*	all those functions iterates 20 (or 20 * 2) times, so:
+	- use u8, then hardcode
+	- they needs optional variables: u32 dig, u8 c
+	
+	bn_add_1(u8 *d, const u8 *a, const u8 *b, const u32 n)
+	bn_sub_1(u8 *d, const u8 *a, const u8 *b, const u32 n)
+	...
+	bn_mon_muladd_dig(u8 *d, const u8 *a, const u8 b, const u8 *N, const u32 n)	
+*/
+static u8 bn_add_1(u8 *d, const u8 *a, const u8 *b, const u32 n){
+	u32 dig;
 	u8 c = 0;
-	for(i = n - 1; i < n; i--){
+	for(u8 i = n - 1; i < n; i--){
 		dig = a[i] + b[i] + c;
 		c = dig >> 8;
 		d[i] = dig;
@@ -41,9 +69,9 @@ static u8 bn_add_1(u8 *d, const u8 *a, const u8 *b, const u32 n)
 }
 
 static u8 bn_sub_1(u8 *d, const u8 *a, const u8 *b, const u32 n){
-	u32 i, dig;
+	u32 dig;
 	u8 c = 1;
-	for (i = n - 1; i < n; i--) {
+	for(u8 i = n - 1; i < n; i--){
 		dig = a[i] + 255 - b[i] + c;
 		c = dig >> 8;
 		d[i] = dig;
@@ -52,23 +80,31 @@ static u8 bn_sub_1(u8 *d, const u8 *a, const u8 *b, const u32 n){
 	return 1 - c;
 }
 
-void bn_reduce(u8 *d, const u8 *N, const u32 n){
-	if (bn_compare(d, N, n) >= 0)
+static void bn_reduce(u8 *d, const u8 *N, const u32 n){
+	if(bn_compare(d, N, n) >= 0)
 		bn_sub_1(d, d, N, n);
 }
 
-void bn_add(u8 *d, u8 *a, const u8 *b, const u8 *N, const u32 n){
+static void bn_add(u8 *d, u8 *a, const u8 *b, const u8 *N, const u32 n){
 	if(bn_add_1(d, a, b, n))
 		bn_sub_1(d, d, N, n);
 
 	bn_reduce(d, N, n);
 }
 
-void bn_sub(u8 *d, u8 *a, const u8 *b, const u8 *N, const u32 n){
+static void bn_sub(u8 *d, u8 *a, const u8 *b, const u8 *N, const u32 n){
 	if(bn_sub_1(d, a, b, n))
 		bn_add_1(d, d, N, n);
 }
 
+void bn_to_mon(u8 *d, const u8 *N, const u32 n){
+	u32 i;
+	for(i = 0; i < 8*n; i++)
+		bn_add(d, d, d, N, n);
+}
+
+/* 	this lookup table had to be moved in _constant address space !
+*/
 static const u8 inv256[0x80] = {
 	0x01, 0xab, 0xcd, 0xb7, 0x39, 0xa3, 0xc5, 0xef,
 	0xf1, 0x1b, 0x3d, 0xa7, 0x29, 0x13, 0x35, 0xdf,
@@ -88,15 +124,15 @@ static const u8 inv256[0x80] = {
 	0x11, 0x3b, 0x5d, 0xc7, 0x49, 0x33, 0x55, 0xff,
 };
 
-void bn_mon_muladd_dig(u8 *d, const u8 *a, const u8 b, const u8 *N, const u32 n){
-	u32 dig, i;
-	u8 z = -(d[n-1] + a[n-1]*b) * inv256[N[n-1]/2];
+static void bn_mon_muladd_dig(u8 *d, const u8 *a, const u8 b, const u8 *N, const u32 n){
+	u32 dig;
+	u8 c = -(d[n-1] + a[n-1] *b) * inv256[N[n-1] /2];
 
-	dig = d[n-1] + a[n-1]*b + N[n-1]*z;
+	dig = d[n-1] + a[n-1] *b + N[n-1] *c;
 	dig >>= 8;
 
-	for(i = n - 2; i < n; i--){
-		dig += d[i] + a[i]*b + N[i]*z;
+	for(u8 i = n - 2; i < n; i--){
+		dig += d[i] + a[i] *b + N[i] *c;
 		d[i+1] = dig;
 		dig >>= 8;
 	}
@@ -104,69 +140,53 @@ void bn_mon_muladd_dig(u8 *d, const u8 *a, const u8 b, const u8 *N, const u32 n)
 	d[0] = dig;
 	dig >>= 8;
 
-	if (dig)
-		bn_sub_1(d, d, N, n);
+	if(dig) bn_sub_1(d, d, N, n);
 
 	bn_reduce(d, N, n);
 }
 
-void bn_mon_mul(u8 *d, const u8 *a, const u8 *b, const u8 *N, const u32 n){
+static void bn_mon_mul(u8 *d, const u8 *a, const u8 *b, const u8 *N, const u32 n){
 	u8 t[512];
-	u32 i;
-
 	bn_zero(t, n);
 
-	for(i = n - 1; i < n; i--)
+	for(u8 i = n-1; i < n; i--)
 		bn_mon_muladd_dig(t, a, b[i], N, n);
 
 	bn_copy(d, t, n);
 }
 
-void bn_to_mon(u8 *d, const u8 *N, const u32 n){
-	u32 i;
-	for(i = 0; i < 8*n; i++)
-		bn_add(d, d, d, N, n);
-}
-
+/* not a _kernel function !!! */
 void bn_from_mon(u8 *d, const u8 *N, const u32 n){
 	u8 t[512];
 
 	bn_zero(t, n);
 	t[n-1] = 1;
-	bn_mon_mul(d, d, t, N, n);
+	bn_mon_mul(d, d, t, N, n);	//512
 }
 
 void bn_mon_exp(u8 *d, const u8 *a, const u8 *N, const u32 n, const u8 *e, const u32 en){
 	u8 t[512];
-	u32 i;
 	u8 mask;
 
 	bn_zero(d, n);
 	d[n-1] = 1;
 	bn_to_mon(d, N, n);
 
-	for(i = 0; i < en; i++)
+	for(u8 i = 0; i < en; i++)
 		for(mask = 0x80; mask != 0; mask >>= 1){
-			bn_mon_mul(t, d, d, N, n);
+			bn_mon_mul(t, d, d, N, n);		//512
 			if((e[i] & mask) != 0)
-				bn_mon_mul(d, t, a, N, n);
+				bn_mon_mul(d, t, a, N, n);	//512
 			else
 				bn_copy(d, t, n);
 		}
 }
 
-void bn_mon_inv(u8 *d, const u8 *a, const u8 *N, const u32 n){
+static void bn_mon_inv(u8 *d, const u8 *a, const u8 *N, const u32 n){
 	u8 t[512], s[512];
 
 	bn_zero(s, n);
 	s[n-1] = 2;
 	bn_sub_1(t, N, s, n);
-	bn_mon_exp(d, a, N, n, t, n);
-}
-
-int elt_is_zero(u8 *d){
-	for(u32 i = 0; i < 20; i++)
-		if (d[i] != 0) return 0;
-
-	return 1;
+	bn_mon_exp(d, a, N, n, t, n);	//512
 }
