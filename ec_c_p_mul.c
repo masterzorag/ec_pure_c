@@ -67,7 +67,7 @@ u8 *_x_to_u8_buffer(const s8 *hex){
 	while(len--){
 		xtmp[0] = *hex++;
 		xtmp[1] = *hex++;
-		*ptr++ = (u8)_x_to_u64(xtmp);
+		*ptr++ = (u8) _x_to_u64(xtmp);
 	}
 
 	return res;
@@ -314,7 +314,7 @@ int main(int argc, char *argv[])
 	bn_print("P.x", (u8 *)&P.x, 20);
 	bn_print("P.y", (u8 *)&P.y, 20);
 	
-	if(memcmp((u8 *)&P, Q, 20) != 0)
+	if(memcmp((u8 *)&P, Q, 40) != 0)
 		puts("FAIL!");
 	else	
 		puts("OK!");
