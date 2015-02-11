@@ -90,43 +90,53 @@ void point_double(struct point *r)
 	if(elt_is_zero(r->y)){
 		bn_zero((u8 *)r, 40); return; }
 		
-	struct point 
-		pp = *r;
-				
-	u8	s[20], t[20], 
-		*px = pp.x, *py = pp.y,
-		*rx = r->x, *ry = r->y;
+	u8	s[20], t[20], u[20]; 
 
-// t = px*px
-	bn_mon_mul(t, px, px, EC.p, 20);	//512
+/* t = px*px
+	bn_mon_mul(t, px, px, EC.p, 20);
+*/	bn_mon_mul(t, r->x, r->x, EC.p, NULL);	// +(su), dig, c
+	
 // s = 2*px*px
-	bn_add(s, t, t, EC.p, 20);		//u32 dig, u8 c
+	bn_add(s, t, t, EC.p, 20);			// +dig, c
 // s = 3*px*px
 	bn_add(s, s, t, EC.p, 20);
 // s = 3*px*px + a
-	bn_add(s, s, EC.a, EC.p, 20);	//const ec_a is needed here
-// t = 2*py
+//!!	bn_copy(tu, EC.a, 20);				//const ec_a is needed here, use (tu)
+	bn_add(s, s, EC.a, EC.p, 20);		
+
+/* t = 2*py
 	bn_add(t, py, py, EC.p, 20);
+*/	bn_add(t, r->y, r->y, EC.p, 20);
 	
 // t = 1/(2*py)
-	u8 u[20]; bn_copy(u, t, 20);	//once u here!
-	bn_mon_inv(t, u, EC.p, 20);
+	bn_copy(u, t, 20);
+	bn_mon_inv(t, u, EC.p, NULL);			// +2 *20
 
 // s = (3*px*px+a)/(2*py)
-	bn_mon_mul(s, s, t, EC.p, 20);	//512
-// rx = s*s
-	bn_mon_mul(rx, s, s, EC.p, 20);	//512
-// t = 2*px
-	bn_add(t, px, px, EC.p, 20);
-// rx = s*s - 2*px
-	bn_sub(rx, rx, t, EC.p, 20);
+	bn_mon_mul(s, s, t, EC.p, NULL);		// +u, dig, c
 	
-// t = -(rx-px)
-	bn_sub(t, px, rx, EC.p, 20);
+// rx = s*s							
+	bn_copy(u, r->x, 20);				// need to backup old rx now ! in u
+	bn_mon_mul(r->x, s, s, EC.p, NULL);		// +t, dig, c
+
+/* t = 2*px
+	bn_add(t, px, px, EC.p, 20);			use previous backed up value, as from caller u = rx
+*/	bn_add(t, u, u, EC.p, 20);
+
+// rx = s*s - 2*px
+	bn_sub(r->x, r->x, t, EC.p, 20);		//r->x =
+	
+// t = -(rx-px)						use previous backed up value, as from caller u = rx
+	bn_sub(t, u, r->x, EC.p, 20);
+	
 // ry = -s*(rx-px)
-	bn_mon_mul(ry, s, t, EC.p, 20);	//512
-// ry = -s*(rx-px) - py
-	bn_sub(ry, ry, py, EC.p, 20);	//u32 dig, u8 c 
+	bn_copy(u, r->y, 20);				// need to backup old ry now ! in u
+	bn_mon_mul(r->y, s, t, EC.p, NULL);		// +?, dig, c
+
+/* ry = -s*(rx-px) - py
+	bn_sub(ry, ry, py, EC.p, 20);		use previous backed up value, as from caller u = ry
+*/	bn_sub(r->y, r->y, u, EC.p, 20);		//r->y =
+
 }	//out rx, ry
 
 void point_add(struct point *r, const struct point *q)
@@ -138,56 +148,58 @@ void point_add(struct point *r, const struct point *q)
 	if(point_is_zero(q)){
 		//*r = pp;	// !!! are already equal! unused? //bn_copy(rx, px, 20); bn_copy(ry, py, 20);
 		return; }
-	
-	struct point 
-		pp = *r, 
-		qq = *q;
 		
-	u8 	s[20], t[20], u[20],
-		*px = pp.x, *py = pp.y,
-		*qx = qq.x, *qy = qq.y,
-		*rx = r->x, *ry = r->y;	
+	u8 	s[20], t[20], u[20];	
+//-		*px = pp.x, *py = pp.y;
+//-		*qx = qq.x, *qy = qq.y,
+//-		*rx = r->x, *ry = r->y;	
 
 // u = qx-px
-	bn_sub(u, qx, px, EC.p, 20);	//u32 dig, u8 c 
+//	bn_sub(u, qx, px, EC.p, 20);	//u32 dig, u8 c 
+	bn_sub(u, q->x, r->x, EC.p, 20);	//u32 dig, u8 c 
 
 	if(elt_is_zero(u)){
 	// u = qy-py
-		bn_sub(u, qy, py, EC.p, 20);
+		bn_sub(u, q->y, r->y, EC.p, 20);		//subs const qy
 		
-		if(elt_is_zero(u))	point_double(r);
-		else			bn_zero((u8 *)r, 40);
+		if(elt_is_zero(u))	
+			point_double(r);
+		else	
+			bn_zero((u8 *)r, 40);
 
 		return;
 	}
 
 // t = 1/(qx-px)
-	bn_mon_inv(t, u, EC.p, 20);
+	bn_mon_inv(t, u, EC.p, NULL);
 	
 // u = qy-py
-	bn_sub(u, qy, py, EC.p, 20);
+	bn_sub(u, q->y, r->y, EC.p, 20);		//subs const qy
+	
 // s = (qy-py)/(qx-px)
-	bn_mon_mul(s, t, u, EC.p, 20);	//512
+	bn_mon_mul(s, t, u, EC.p, NULL);	//512
+	
 // rx = s*s
-	bn_mon_mul(rx, s, s, EC.p, 20);	//512
+	bn_copy(u, r->x, 20);				// need to backup old rx now ! in u
+	bn_mon_mul(r->x, s, s, EC.p, NULL);	//512
 // t = px+qx
-	bn_add(t, px, qx, EC.p, 20);
+	bn_add(t, u, q->x, EC.p, 20);		//adds const qx
 // rx = s*s - (px+qx)
-	bn_sub(rx, rx, t, EC.p, 20);
+	bn_sub(r->x, r->x, t, EC.p, 20);
 
 // t = -(rx-px)
-	bn_sub(t, px, rx, EC.p, 20);
+	bn_sub(t, u, r->x, EC.p, 20);
 // ry = -s*(rx-px)
-	bn_mon_mul(ry, s, t, EC.p, 20);	//512
+	bn_copy(u, r->y, 20);				// need to backup old ry now ! in u
+	bn_mon_mul(r->y, s, t, EC.p, NULL);	//512
 // ry = -s*(rx-px) - py
-	bn_sub(ry, ry, py, EC.p, 20);
+	bn_sub(r->y, r->y, u, EC.p, 20);
 }	//out rx, ry
 
-/*	we need a _local *ctx of vars to pass across point_double() and point_add()
-	it should contain: u32 dig, u8 c and something for u8 t[512] (and s[512])!
-	let be this the main _kernel function, ideally doing P[gid] = k[gid] x EC.G
+/*
+	let be this the main _kernel function, ideally doing P[gid] = k[gid] x EC.G 
 */
-void point_mul(struct point *d, const u8 *a, const struct point *b)
+void point_mul(struct point *d, const u8 *k, const struct point *b)
 {
 	u8 mask;
 	bn_zero((u8 *)d, 40);
@@ -195,7 +207,7 @@ void point_mul(struct point *d, const u8 *a, const struct point *b)
 	for(u8 i = 0; i < 21; i++)
 		for(mask = 0x80; mask != 0; mask >>= 1){
 			point_double(d);
-			if((a[i] & mask) != 0)
+			if((k[i] & mask) != 0)
 				point_add(d, b);
 		}
 }
