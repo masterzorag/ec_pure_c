@@ -82,7 +82,7 @@ static void bn_sub(u8 *d, const u8 *a, const u8 *b, const u8 *N, const u32 n){
 	}
 }
 
-/* 	this lookup table has to be moved in _constant address space ! */
+/* 	this lookup table must be moved in _constant address space ! */
 static const u8 inv256[0x80] = {
 	0x01, 0xab, 0xcd, 0xb7, 0x39, 0xa3, 0xc5, 0xef,
 	0xf1, 0x1b, 0x3d, 0xa7, 0x29, 0x13, 0x35, 0xdf,
@@ -132,25 +132,16 @@ static void bn_mon_mul(u8 *io, const u8 *a, const u8 *b,
 }
 
 static void bn_mon_inv(u8 *d, const u8 *a, 
-	const u8 *N, 		// mod p	
-//+	const u8 *U		// U[20], per_curve_constant
-	struct local *aux_local		// HI _loc_priority
-//	u8 d[20], c; u32 dig;		// 20 + 1 + 4 = 25b
+	const u8 *N,		 		// mod p	
+	const u8 *U,				// U[20], per_curve_constant
+	struct local *aux_local		// u8 d[20], c; u32 dig;	// 20 + 1 + 4 = 25b
 ){
 	u32 dig; u8 c;		// HI _loc_priority	
 /*
-	prepare u[20]: use t, dig, c
-	U is per_curve_constant !!!, we should precompute it in main and pass it as _constant address space
-*/
-	u8 U[20], t[20];	//U has low _loc_priority
-	
-	bn_zero(t, 20);	t[20-1] = 2;
-
-	c = 1; for(u8 i = 20 - 1; i < 20; i--){ dig = N[i] + 255 - t[i] + c; c = dig >> 8; U[i] = dig; }			//-	bn_sub_1(U, N, t, n);
-/*
 	U prepared, check with: bn_print("U", U, 20);
+	u8 U[20], t[20];									//-	bn_sub_1(U, N, t, n);
 */
-//!!	prepare d[20]: use dig, c
+//!!	now prepare d[20]: use dig, c
 	bn_zero(d, 20);	d[20-1] = 1;
 	
 	for(u8 i = 0; i < 8 *20; i++){
@@ -164,16 +155,18 @@ static void bn_mon_inv(u8 *d, const u8 *a,
 		}
 	}
 	
+	u8 t[20];
+//!! now do stuff with: d, t, use also U, a	
 	for(u8 i = 0; i < 20; i++){
 		for(u8 mask = 0x80; mask != 0; mask >>= 1){
 			bn_mon_mul(t, d, d, N, NULL);		//+ u32 dig; u8 d[20], c; HI _loc_priority
 					
-			if((U[i] & mask) != 0)				//!!	use now U[20], per_curve_constant	
-				bn_mon_mul(d, t, a, N, NULL);	//!!	use now a[20]
+/* U */		if((U[i] & mask) != 0)				// use now U[20], per_curve_constant	
+/* a */			bn_mon_mul(d, t, a, N, NULL);	// use now a[20]
 			else
 				bn_copy(d, t, 20);
 		}
-	}	
+	}
 }
 
 /* below this: not kernel functions */

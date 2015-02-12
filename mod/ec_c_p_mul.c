@@ -32,6 +32,8 @@ struct Elliptic_Curve {
 	u8 a[20];
 	u8 b[20];
 	struct point G;
+	u8 U[20];
+	u32 pad[2];
 };
 
 static struct Elliptic_Curve EC;
@@ -100,7 +102,7 @@ void point_double(struct point *r)
 	
 // t = 1/(2*py)
 	bn_copy(u, t, 20);
-	bn_mon_inv(t, u, EC.p, NULL);		// +U[20], per_curve_constant
+	bn_mon_inv(t, u, EC.p, EC.U, NULL);	// +U[20], per_curve_constant
 
 // s = (3*px*px+a)/(2*py)
 	bn_mon_mul(s, s, t, EC.p, NULL);		// +aux
@@ -153,7 +155,7 @@ void point_add(struct point *r, const struct point *q)
 	}
 
 // t = 1/(qx-px)
-	bn_mon_inv(t, u, EC.p, NULL);		// +U[20], per_curve_constant
+	bn_mon_inv(t, u, EC.p, EC.U, NULL);	// +U[20], per_curve_constant
 	
 // u = qy-py
 	bn_sub(u, q->y, r->y, EC.p, 20);		// subs const qy !!
@@ -207,30 +209,39 @@ void point_from_mon(struct point *p){
 	bn_from_mon(p->y, EC.p, 20);
 }
 
+/* precompute once u8 U[20], needed in bn_mon_inv */
+void precompute(u8 *U, const u8 *N){
+	u32 dig;
+	u8 d[20], c;	//U has low _loc_priority
+	
+	bn_zero(d, 20);	d[20-1] = 2;
+
+	c = 1; for(u8 i = 20 - 1; i < 20; i--){ dig = N[i] + 255 - d[i] + c; c = dig >> 8; U[i] = dig; }			//-	bn_sub_1(U, N, t, n);
+}
+
 int main(int argc, char *argv[])
 {
-	u8 *p, *a, *b, *Gx, *Gy, *Q, *k;
-	
+	u8 *t, *Q, *k;
+		
 	if(!argv[1]){
 	/*
 		Valid test case
-		----------------
-		
+		----------------		
 		Curve domain parameters:
 		p:	c1c627e1638fdc8e24299bb041e4e23af4bb5427		is prime
 		a:	c1c627e1638fdc8e24299bb041e4e23af4bb5424		divisor g = 62980
 		b:	877a6d84155a1de374b72d9f9d93b36bb563b2ab		divisor g = 227169643
 	*/
-		p = _x_to_u8_buffer("c1c627e1638fdc8e24299bb041e4e23af4bb5427");
-		a = _x_to_u8_buffer("c1c627e1638fdc8e24299bb041e4e23af4bb5424");
-		b = _x_to_u8_buffer("877a6d84155a1de374b72d9f9d93b36bb563b2ab");
+		t = _x_to_u8_buffer("c1c627e1638fdc8e24299bb041e4e23af4bb5427");	memcpy(EC.p, t, 20);
+		t = _x_to_u8_buffer("c1c627e1638fdc8e24299bb041e4e23af4bb5424");	memcpy(EC.a, t, 20);
+		t = _x_to_u8_buffer("877a6d84155a1de374b72d9f9d93b36bb563b2ab");	memcpy(EC.b, t, 20);
 	/*	
 		Base point:
 		Gx: 010aff82b3ac72569ae645af3b527be133442131			divisor g = 32209245
 		Gy: 46b8ec1e6d71e5ecb549614887d57a287df573cc			divisor g = 972
 	*/
-		Gx = _x_to_u8_buffer("010aff82b3ac72569ae645af3b527be133442131");
-		Gy = _x_to_u8_buffer("46b8ec1e6d71e5ecb549614887d57a287df573cc");
+		t = _x_to_u8_buffer("010aff82b3ac72569ae645af3b527be133442131");	memcpy(EC.G.x, t, 20);
+		t = _x_to_u8_buffer("46b8ec1e6d71e5ecb549614887d57a287df573cc");	memcpy(EC.G.y, t, 20);
 	/*
 		known verified P point for first curve, test vectors
 		P.x	41da1a8f74ff8d3f1ce20ef3e9d8865c96014fe3		divisor g = 495
@@ -243,23 +254,23 @@ int main(int argc, char *argv[])
 	*/		
 		k = _x_to_u8_buffer("00542d46e7b3daac8aeb81e533873aabd6d74bb710");
 	} else {
-	/*
+	/*	
 		Curve domain parameters:
 		p:	dfd7e09d5092e7a5d24fd2fec423f7012430ae9d		is prime
 		a:	dfd7e09d5092e7a5d24fd2fec423f7012430ae9a		divisor g = 530 GCD
 		b:	01914dc5f39d6da3b1fa841fdc891674fa439bd4		divisor g = 266668
 		N:	00dfd7e09d5092e7a5d25167ecfcfde992ebf8ecad		is prime
 	*/
-		p = _x_to_u8_buffer("dfd7e09d5092e7a5d24fd2fec423f7012430ae9d");
-		a = _x_to_u8_buffer("dfd7e09d5092e7a5d24fd2fec423f7012430ae9a");
-		b = _x_to_u8_buffer("01914dc5f39d6da3b1fa841fdc891674fa439bd4");
+		t = _x_to_u8_buffer("dfd7e09d5092e7a5d24fd2fec423f7012430ae9d");	memcpy(EC.p, t, 20);
+		t = _x_to_u8_buffer("dfd7e09d5092e7a5d24fd2fec423f7012430ae9a");	memcpy(EC.a, t, 20);
+		t = _x_to_u8_buffer("01914dc5f39d6da3b1fa841fdc891674fa439bd4");	memcpy(EC.b, t, 20);
 	/*
 		Base point:
 		Gx:	70ee7b94f7d52ed6b1a1d3201e2d85d3b82a9810		divisor g = 17200
 		Gy:	0b23823cd6dc3df20979373e5662f7083f6aa56f		divisor g = 30017
 	*/
-		Gx = _x_to_u8_buffer("70ee7b94f7d52ed6b1a1d3201e2d85d3b82a9810");
-		Gy = _x_to_u8_buffer("0b23823cd6dc3df20979373e5662f7083f6aa56f");
+		t = _x_to_u8_buffer("70ee7b94f7d52ed6b1a1d3201e2d85d3b82a9810");	memcpy(EC.G.x, t, 20);
+		t = _x_to_u8_buffer("0b23823cd6dc3df20979373e5662f7083f6aa56f");	memcpy(EC.G.y, t, 20);
 	/*
 		target T point for second curve, unknown k !!!
 		T.x	5432bddd1f97418147aff016eaa6100834f2caa8		divisor g = 29512
@@ -276,21 +287,22 @@ int main(int argc, char *argv[])
 	*/		
 		k = _x_to_u8_buffer("00542d46e7b3daac8aeb81e533873aabd6d74bb710");
 	}
-	
-	/* fill global curve variables from allocated buffers, then release them */	
-	memcpy(EC.p, p, 20);		free(p);
-	memcpy(EC.a, a, 20);		free(a);
-	memcpy(EC.b, b, 20);		free(b);
-	memcpy(EC.G.x, Gx, 20);		free(Gx);
-	memcpy(EC.G.y, Gy, 20);		free(Gy);
+	/*
+		precompute u8 U[20], per_curve_constant: bn_sub_1(U, N, t, n)
+		to use in bn_mon_inv, put in _constant as EC and inv256[0x80] 	
+	*/	
+	precompute(t, EC.p);
+	memcpy(EC.U, t, 20);
 	
 	// after this preparation domain_parameters remains constant!
 	bn_to_mon(EC.a, EC.p, 20);
 	bn_to_mon(EC.b, EC.p, 20);	//b used here
 	point_to_mon(&EC.G);
-
-	// known/target pub stuff: bn_print("pub", Q, 40);
-
+/*
+	printf("point:\t%db\n", sizeof (struct point));
+	printf("EC:\t%db @%p %d %d\n", sizeof EC, &EC, ((long)&EC%16 == 0), ((unsigned long)&EC & 15) == 0);
+	printf("inv256:\t%db @%p %d %d\n", sizeof inv256, &inv256, ((long)&inv256%16 == 0), ((unsigned long)&inv256 & 15) == 0);
+*/
 	struct point ec_Q;		// mon, stores pub: x+y
 	memcpy(ec_Q.x, Q, 20);
 	memcpy(ec_Q.y, Q + 20, 20);
@@ -308,8 +320,8 @@ int main(int argc, char *argv[])
 	
 	point_from_mon(&P);
 	
-	bn_print("P.x", (u8 *)&P.x, 20);
-	bn_print("P.y", (u8 *)&P.y, 20);
+	bn_print("P.x", P.x, 20);
+	bn_print("P.y", P.y, 20);
 	
 	if(memcmp((u8 *)&P, Q, 40) != 0)
 		puts("FAIL!");
