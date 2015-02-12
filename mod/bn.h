@@ -50,6 +50,14 @@ static int bn_compare(const u8 *a, const u8 *b, const u32 n){
 	return 0;
 }
 
+void bn_print(const char *name, const u8 *a, const u32 n){
+	printf("%s:\t", name);
+	for(u32 i = 0; i < n; i++)
+		printf("%02x", a[i]);
+
+	printf("\n");
+}
+
 static void bn_add(u8 *d, const u8 *a, const u8 *b, const u8 *N, const u32 n){
 	u32 dig; u8 c;					//needs aux_local, aux.d[20] unused
 	
@@ -124,22 +132,29 @@ static void bn_mon_mul(u8 *io, const u8 *a, const u8 *b,
 }
 
 static void bn_mon_inv(u8 *d, const u8 *a, 
-	const u8 *N, 		// mod p
+	const u8 *N, 		// mod p	
+//+	const u8 *U		// U[20], per_curve_constant
 	struct local *aux_local		// HI _loc_priority
 //	u8 d[20], c; u32 dig;		// 20 + 1 + 4 = 25b
 ){
-	u8 u[20], t[20];	//u has low _loc_priority
-	u32 dig; u8 c;		// HI _loc_priority
+	u32 dig; u8 c;		// HI _loc_priority	
+/*
+	prepare u[20]: use t, dig, c
+	U is per_curve_constant !!!, we should precompute it in main and pass it as _constant address space
+*/
+	u8 U[20], t[20];	//U has low _loc_priority
 	
 	bn_zero(t, 20);	t[20-1] = 2;
 
-	c = 1; for(u8 i = 20 - 1; i < 20; i--){ dig = N[i] + 255 - t[i] + c; c = dig >> 8; u[i] = dig; }			//-	bn_sub_1(u, N, t, n);
-
+	c = 1; for(u8 i = 20 - 1; i < 20; i--){ dig = N[i] + 255 - t[i] + c; c = dig >> 8; U[i] = dig; }			//-	bn_sub_1(U, N, t, n);
+/*
+	U prepared, check with: bn_print("U", U, 20);
+*/
+//!!	prepare d[20]: use dig, c
 	bn_zero(d, 20);	d[20-1] = 1;
 	
 	for(u8 i = 0; i < 8 *20; i++){
-//-		c = bn_add_1(d, d, d, 20);
-		c = 0; for(u8 i = 20 - 1; i < 20; i--){ dig = d[i] + d[i] + c; c = dig >> 8; d[i] = dig; }
+		c = 0; for(u8 i = 20 - 1; i < 20; i--){ dig = d[i] + d[i] + c; c = dig >> 8; d[i] = dig; }				//-	c = bn_add_1(d, d, d, 20);
 		if(c){	
 			c = 1; for(u8 i = 20 - 1; i < 20; i--){ dig = d[i] + 255 - N[i] + c; c = dig >> 8; d[i] = dig; }	//-	bn_sub_1(d, d, N, n);
 		}
@@ -152,9 +167,9 @@ static void bn_mon_inv(u8 *d, const u8 *a,
 	for(u8 i = 0; i < 20; i++){
 		for(u8 mask = 0x80; mask != 0; mask >>= 1){
 			bn_mon_mul(t, d, d, N, NULL);		//+ u32 dig; u8 d[20], c; HI _loc_priority
-			
-			if((u[i] & mask) != 0)
-				bn_mon_mul(d, t, a, N, NULL);	//+ u32 dig; u8 d[20], c; HI _loc_priority
+					
+			if((U[i] & mask) != 0)				//!!	use now U[20], per_curve_constant	
+				bn_mon_mul(d, t, a, N, NULL);	//!!	use now a[20]
 			else
 				bn_copy(d, t, 20);
 		}

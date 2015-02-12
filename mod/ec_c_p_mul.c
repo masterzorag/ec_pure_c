@@ -73,14 +73,6 @@ u8 *_x_to_u8_buffer(const s8 *hex){
 	return res;
 }
 
-void bn_print(const char *name, const u8 *a, const u32 n){
-	printf("%s:\t", name);
-	for(u32 i = 0; i < n; i++)
-		printf("%02x", a[i]);
-
-	printf("\n");
-}
-
 int point_is_zero(const struct point *p){
 	return elt_is_zero(p->x) && elt_is_zero(p->y);
 }
@@ -92,9 +84,8 @@ void point_double(struct point *r)
 		
 	u8	s[20], t[20], u[20]; 
 
-/* t = px*px
-	bn_mon_mul(t, px, px, EC.p, 20);
-*/	bn_mon_mul(t, r->x, r->x, EC.p, NULL);	// +(su), dig, c
+// t = px*px
+	bn_mon_mul(t, r->x, r->x, EC.p, NULL);	// +aux
 	
 // s = 2*px*px
 	bn_add(s, t, t, EC.p, 20);			// +dig, c
@@ -104,38 +95,35 @@ void point_double(struct point *r)
 //!!	bn_copy(tu, EC.a, 20);				//const ec_a is needed here, use (tu)
 	bn_add(s, s, EC.a, EC.p, 20);		
 
-/* t = 2*py
-	bn_add(t, py, py, EC.p, 20);
-*/	bn_add(t, r->y, r->y, EC.p, 20);
+// t = 2*py
+	bn_add(t, r->y, r->y, EC.p, 20);
 	
 // t = 1/(2*py)
 	bn_copy(u, t, 20);
-	bn_mon_inv(t, u, EC.p, NULL);			// +2 *20
+	bn_mon_inv(t, u, EC.p, NULL);		// +U[20], per_curve_constant
 
 // s = (3*px*px+a)/(2*py)
-	bn_mon_mul(s, s, t, EC.p, NULL);		// +u, dig, c
+	bn_mon_mul(s, s, t, EC.p, NULL);		// +aux
 	
 // rx = s*s							
-	bn_copy(u, r->x, 20);				// need to backup old rx now ! in u
-	bn_mon_mul(r->x, s, s, EC.p, NULL);		// +t, dig, c
+	bn_copy(u, r->x, 20);				// backup old rx now ! u = rx
+	bn_mon_mul(r->x, s, s, EC.p, NULL);	// +aux
 
-/* t = 2*px
-	bn_add(t, px, px, EC.p, 20);			use previous backed up value, as from caller u = rx
-*/	bn_add(t, u, u, EC.p, 20);
+// t = 2*px							reuse backed up value: u = rx
+	bn_add(t, u, u, EC.p, 20);			
 
 // rx = s*s - 2*px
 	bn_sub(r->x, r->x, t, EC.p, 20);		//r->x =
 	
-// t = -(rx-px)						use previous backed up value, as from caller u = rx
+// t = -(rx-px)						reuse backed up value: u = rx
 	bn_sub(t, u, r->x, EC.p, 20);
 	
 // ry = -s*(rx-px)
-	bn_copy(u, r->y, 20);				// need to backup old ry now ! in u
-	bn_mon_mul(r->y, s, t, EC.p, NULL);		// +?, dig, c
+	bn_copy(u, r->y, 20);				// backup old ry now ! u = ry
+	bn_mon_mul(r->y, s, t, EC.p, NULL);	// +aux
 
-/* ry = -s*(rx-px) - py
-	bn_sub(ry, ry, py, EC.p, 20);		use previous backed up value, as from caller u = ry
-*/	bn_sub(r->y, r->y, u, EC.p, 20);		//r->y =
+// ry = -s*(rx-px) - py					reuse backed up value: u = ry
+	bn_sub(r->y, r->y, u, EC.p, 20);		//r->y =
 
 }	//out rx, ry
 
@@ -145,22 +133,16 @@ void point_add(struct point *r, const struct point *q)
 		*r = *q;		//bn_copy(rx, qx, 20); bn_copy(ry, qy, 20);
 		return; }
 
-	if(point_is_zero(q)){
-		//*r = pp;	// !!! are already equal! unused? //bn_copy(rx, px, 20); bn_copy(ry, py, 20);
-		return; }
+	if(point_is_zero(q)) return;
 		
-	u8 	s[20], t[20], u[20];	
-//-		*px = pp.x, *py = pp.y;
-//-		*qx = qq.x, *qy = qq.y,
-//-		*rx = r->x, *ry = r->y;	
+	u8 	s[20], t[20], u[20];
 
 // u = qx-px
-//	bn_sub(u, qx, px, EC.p, 20);	//u32 dig, u8 c 
-	bn_sub(u, q->x, r->x, EC.p, 20);	//u32 dig, u8 c 
+	bn_sub(u, q->x, r->x, EC.p, 20);		//u32 dig, u8 c 
 
 	if(elt_is_zero(u)){
 	// u = qy-py
-		bn_sub(u, q->y, r->y, EC.p, 20);		//subs const qy
+		bn_sub(u, q->y, r->y, EC.p, 20);	// subs const qy !!
 		
 		if(elt_is_zero(u))	
 			point_double(r);
@@ -171,28 +153,31 @@ void point_add(struct point *r, const struct point *q)
 	}
 
 // t = 1/(qx-px)
-	bn_mon_inv(t, u, EC.p, NULL);
+	bn_mon_inv(t, u, EC.p, NULL);		// +U[20], per_curve_constant
 	
 // u = qy-py
-	bn_sub(u, q->y, r->y, EC.p, 20);		//subs const qy
+	bn_sub(u, q->y, r->y, EC.p, 20);		// subs const qy !!
 	
 // s = (qy-py)/(qx-px)
-	bn_mon_mul(s, t, u, EC.p, NULL);	//512
+	bn_mon_mul(s, t, u, EC.p, NULL);		// +aux
 	
 // rx = s*s
-	bn_copy(u, r->x, 20);				// need to backup old rx now ! in u
-	bn_mon_mul(r->x, s, s, EC.p, NULL);	//512
+	bn_copy(u, r->x, 20);				// backup old rx now ! u = rx
+	bn_mon_mul(r->x, s, s, EC.p, NULL);	// +aux
+	
 // t = px+qx
-	bn_add(t, u, q->x, EC.p, 20);		//adds const qx
+	bn_add(t, u, q->x, EC.p, 20);		// adds const qx !!
 // rx = s*s - (px+qx)
 	bn_sub(r->x, r->x, t, EC.p, 20);
 
-// t = -(rx-px)
+// t = -(rx-px)						reuse backed up value: u = rx
 	bn_sub(t, u, r->x, EC.p, 20);
+	
 // ry = -s*(rx-px)
-	bn_copy(u, r->y, 20);				// need to backup old ry now ! in u
-	bn_mon_mul(r->y, s, t, EC.p, NULL);	//512
-// ry = -s*(rx-px) - py
+	bn_copy(u, r->y, 20);				// backup old ry now ! u = ry
+	bn_mon_mul(r->y, s, t, EC.p, NULL);	// +aux
+	
+// ry = -s*(rx-px) - py					reuse backed up value: u = ry
 	bn_sub(r->y, r->y, u, EC.p, 20);
 }	//out rx, ry
 
