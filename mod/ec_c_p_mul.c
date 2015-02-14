@@ -22,19 +22,44 @@
 #include <string.h>
 #include "bn.h"
 
+struct data{		// 176b
+	u8 x[20];
+	u8 y[20];
+				
+	u8 s[20];		//
+	u8 t[20];		//16
+	u8 u[20];		//
+	 u8 v[20];	// for inv
+
+	u8 d[20];		//+ mul
+	 u8 k[21];
+	u8 c;		//+ all
+	u8 pad[8];	//we can store NDRange debug
+	u32 dig;		//+ all
+}
+__attribute__((aligned(16)));	
+
+/*
+	32768b / 176b = 186 (max wi in a group)
+	186 % 16 = 10 (!= 0, so:
+	176 * 176b = 30976b needed in a wg
+	32768 - 30976 = 1792b unused 
+*/
+
 struct point{
 	u8 x[20];
 	u8 y[20];
 };
 
-struct Elliptic_Curve {
+struct Elliptic_Curve{	// 128b
 	u8 p[20];
 	u8 a[20];
 	u8 b[20];
 	struct point G;
-	u8 U[20];
-	u32 pad[2];
-};
+	u8 U[20], V[20];		//per_curve_inv constants
+	u32 pad;
+}
+__attribute__((aligned(16)));	//144b
 
 static struct Elliptic_Curve EC;
 
@@ -84,7 +109,7 @@ void point_double(struct point *r)
 	if(elt_is_zero(r->y)){
 		bn_zero((u8 *)r, 40); return; }
 		
-	u8	s[20], t[20], u[20]; 
+	u8	s[20], t[20], u[20];
 
 // t = px*px
 	bn_mon_mul(t, r->x, r->x, EC.p, NULL);	// +aux
@@ -102,7 +127,7 @@ void point_double(struct point *r)
 	
 // t = 1/(2*py)
 	bn_copy(u, t, 20);
-	bn_mon_inv(t, u, EC.p, EC.U, NULL);	// +U[20], per_curve_constant
+	bn_mon_inv(t, u, EC.p, EC.U, EC.V, NULL);	// +U, V, (v)
 
 // s = (3*px*px+a)/(2*py)
 	bn_mon_mul(s, s, t, EC.p, NULL);		// +aux
@@ -155,7 +180,7 @@ void point_add(struct point *r, const struct point *q)
 	}
 
 // t = 1/(qx-px)
-	bn_mon_inv(t, u, EC.p, EC.U, NULL);	// +U[20], per_curve_constant
+	bn_mon_inv(t, u, EC.p, EC.U, EC.V, NULL);	// +U, V, (v)
 	
 // u = qy-py
 	bn_sub(u, q->y, r->y, EC.p, 20);		// subs const qy !!
@@ -209,14 +234,30 @@ void point_from_mon(struct point *p){
 	bn_from_mon(p->y, EC.p, 20);
 }
 
-/* precompute once u8 U[20], needed in bn_mon_inv */
-void precompute(u8 *U, const u8 *N){
+/* precompute once u8 U[20] and V[20] needed in bn_mon_inv */
+void precompute(u8 *U, u8 *V, const u8 *N){
 	u32 dig;
-	u8 d[20], c;	//U has low _loc_priority
+	u8 d[20], c;
 	
+	/* precompute U */
 	bn_zero(d, 20);	d[20-1] = 2;
 
-	c = 1; for(u8 i = 20 - 1; i < 20; i--){ dig = N[i] + 255 - d[i] + c; c = dig >> 8; U[i] = dig; }			//-	bn_sub_1(U, N, t, n);
+	c = 1; for(u8 i = 20 - 1; i < 20; i--){ dig = N[i] + 255 - d[i] + c; c = dig >> 8; U[i] = dig; }	//-	bn_sub_1(U, N, t, n);
+
+	/* precompute V */
+	bn_zero(d, 20);	d[20-1] = 1;
+	
+	for(u8 i = 0; i < 8 *20; i++){
+		c = 0; for(u8 i = 20 - 1; i < 20; i--){ dig = d[i] + d[i] + c; c = dig >> 8; d[i] = dig; }				//-	c = bn_add_1(d, d, d, 20);
+		if(c){	
+			c = 1; for(u8 i = 20 - 1; i < 20; i--){ dig = d[i] + 255 - N[i] + c; c = dig >> 8; d[i] = dig; }	//-	bn_sub_1(d, d, N, n);
+		}
+
+		if(bn_compare(d, N, 20) >= 0){
+			c = 1; for(u8 i = 20 - 1; i < 20; i--){ dig = d[i] + 255 - N[i] + c; c = dig >> 8; d[i] = dig; }	//-	bn_sub_1(d, d, N, n);
+		}
+	}
+	bn_copy(V, d, 20);
 }
 
 int main(int argc, char *argv[])
@@ -290,15 +331,16 @@ int main(int argc, char *argv[])
 	/*
 		precompute u8 U[20], per_curve_constant: bn_sub_1(U, N, t, n)
 		to use in bn_mon_inv, put in _constant as EC and inv256[0x80] 	
-	*/	
-	precompute(t, EC.p);
-	memcpy(EC.U, t, 20);
+	*/
+	t = NULL;
+	precompute(EC.U, EC.V, EC.p);
 	
 	// after this preparation domain_parameters remains constant!
 	bn_to_mon(EC.a, EC.p, 20);
 	bn_to_mon(EC.b, EC.p, 20);	//b used here
 	point_to_mon(&EC.G);
 /*
+	printf("data:\t%db %d\n", sizeof (struct data), (sizeof (struct data) %16 == 0));
 	printf("point:\t%db\n", sizeof (struct point));
 	printf("EC:\t%db @%p %d %d\n", sizeof EC, &EC, ((long)&EC%16 == 0), ((unsigned long)&EC & 15) == 0);
 	printf("inv256:\t%db @%p %d %d\n", sizeof inv256, &inv256, ((long)&inv256%16 == 0), ((unsigned long)&inv256 & 15) == 0);

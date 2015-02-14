@@ -51,15 +51,19 @@ static int bn_compare(const u8 *a, const u8 *b, const u32 n){
 }
 
 void bn_print(const char *name, const u8 *a, const u32 n){
-	printf("%s:\t", name);
-	for(u32 i = 0; i < n; i++)
-		printf("%02x", a[i]);
-
+	if(name) printf("%s:\t", name);
+	for(u32 i = 0; i < n; i++) printf("%02x", a[i]);
 	printf("\n");
 }
 
-static void bn_add(u8 *d, const u8 *a, const u8 *b, const u8 *N, const u32 n){
-	u32 dig; u8 c;					//needs aux_local, aux.d[20] unused
+static void bn_add(
+	u8 *d,				//io
+	const u8 *a, 
+	const u8 *b,			//in point_add is also qx
+	const u8 *N,			//mod N
+	const u32 n)			//unused
+{
+	u32 dig; u8 c;			//needs aux_local, aux.d[20] unused
 	
 	c = 0; for(u8 i = 20 - 1; i < 20; i--){ dig = a[i] + b[i] + c; c = dig >> 8; d[i] = dig; }				//-	c = bn_add_1(d, a, b, n);
 	if(c){
@@ -71,12 +75,17 @@ static void bn_add(u8 *d, const u8 *a, const u8 *b, const u8 *N, const u32 n){
 	}
 }
 
-static void bn_sub(u8 *d, const u8 *a, const u8 *b, const u8 *N, const u32 n){
-	u32 dig; u8 c;					//needs aux_local, aux.d[20] unused
+static void bn_sub(
+	u8 *d,				//io
+	const u8 *a,			//in point_add is also qx, qy 
+	const u8 *b,
+	const u8 *N,			//mod N
+	const u32 n)			//unused
+{
+	u32 dig; u8 c;			//needs aux_local, aux.d[20] unused
 	
 	c = 1; for(u8 i = 20 - 1; i < 20; i--){ dig = a[i] + 255 - b[i] + c; c = dig >> 8; d[i] = dig; }		//-	c = bn_sub_1(d, a, b, n);
-	c = 1 - c;							
-	
+	c = 1 - c;
 	if(c){
 		c = 0; for(u8 i = 20 - 1; i < 20; i--){ dig = d[i] + N[i] + c;	c = dig >> 8; d[i] = dig; }			//-	bn_add_1(d, d, N, n);
 	}
@@ -131,17 +140,14 @@ static void bn_mon_mul(u8 *io, const u8 *a, const u8 *b,
 	bn_copy(io, d, 20);
 }
 
-static void bn_mon_inv(u8 *d, const u8 *a, 
-	const u8 *N,		 		// mod p	
-	const u8 *U,				// U[20], per_curve_constant
-	struct local *aux_local		// u8 d[20], c; u32 dig;	// 20 + 1 + 4 = 25b
+static void bn_mon_inv(u8 *d,	// d = 1/a mod N
+	const u8 *a,				
+	const u8 *N,
+	const u8 *U,				// precomputed per_curve_constant
+	const u8 *V,				// precomputed per_curve_constant
+	struct local *aux_local		// u8 d[20], c; u32 dig;
 ){
-	u32 dig; u8 c;		// HI _loc_priority	
-/*
-	U prepared, check with: bn_print("U", U, 20);
-	u8 U[20], t[20];									//-	bn_sub_1(U, N, t, n);
-*/
-//!!	now prepare d[20]: use dig, c
+/*!!	now prepare d[20]: use dig, c
 	bn_zero(d, 20);	d[20-1] = 1;
 	
 	for(u8 i = 0; i < 8 *20; i++){
@@ -154,20 +160,29 @@ static void bn_mon_inv(u8 *d, const u8 *a,
 			c = 1; for(u8 i = 20 - 1; i < 20; i--){ dig = d[i] + 255 - N[i] + c; c = dig >> 8; d[i] = dig; }	//-	bn_sub_1(d, d, N, n);
 		}
 	}
-	
-	u8 t[20];
-//!! now do stuff with: d, t, use also U, a	
+	bn_print("d", d, 20);
+*/	
+	bn_copy(d, V, 20);			//1 copy from _const to loc shall be: v = V in advance
+
+/*	now do stuff with: d, v, use also U, a		
+	as seen below, v can starts initialized per_curve_constant, 
+	saving a bn_mun_mul
+*/	u8 v[20];
+
 	for(u8 i = 0; i < 20; i++){
 		for(u8 mask = 0x80; mask != 0; mask >>= 1){
-			bn_mon_mul(t, d, d, N, NULL);		//+ u32 dig; u8 d[20], c; HI _loc_priority
+			bn_mon_mul(v, d, d, N, NULL);		// +aux, first round can be precomputed !
 					
-/* U */		if((U[i] & mask) != 0)				// use now U[20], per_curve_constant	
-/* a */			bn_mon_mul(d, t, a, N, NULL);	// use now a[20]
+			/* v can starts initialized per_curve_constant !!!
+			if(mask == 0x80 && i == 0) bn_print("v", v, 20);*/
+		
+/* U */		if((U[i] & mask) != 0)				// per_curve_constant	
+/* a */			bn_mon_mul(d, v, a, N, NULL);	// use now a[20]
 			else
-				bn_copy(d, t, 20);
+				bn_copy(d, v, 20);
 		}
 	}
-}
+}	//out d
 
 /* below this: not kernel functions */
 void bn_to_mon(u8 *d, const u8 *N, const u32 n){
