@@ -101,13 +101,16 @@ u8 *_x_to_u8_buffer(const s8 *hex){
 }
 
 int point_is_zero(const struct point *p){
-	return elt_is_zero(p->x) && elt_is_zero(p->y);
+	return bn_is_zero(p->x) && bn_is_zero(p->y);
 }
 
 void point_double(struct point *r)
 {	
-	if(elt_is_zero(r->y)){
-		bn_zero((u8 *)r, 40); return; }
+	if(bn_is_zero(r->y)){
+		bn_zero(r->x);
+		bn_zero(r->y);
+		return;
+	}
 		
 	u8	s[20], t[20], u[20];
 
@@ -115,49 +118,49 @@ void point_double(struct point *r)
 	bn_mon_mul(t, r->x, r->x, EC.p, NULL);	// +aux
 	
 // s = 2*px*px
-	bn_add(s, t, t, EC.p, 20);			// +dig, c
+	bn_add(s, t, t, EC.p, NULL);			// +dig, c
 // s = 3*px*px
-	bn_add(s, s, t, EC.p, 20);
+	bn_add(s, s, t, EC.p, NULL);
 // s = 3*px*px + a
-//!!	bn_copy(tu, EC.a, 20);				//const ec_a is needed here, use (tu)
-	bn_add(s, s, EC.a, EC.p, 20);		
+//!!	bn_copy(tu, EC.a);				//const ec_a is needed here, use (tu)
+	bn_add(s, s, EC.a, EC.p, NULL);		
 
 // t = 2*py
-	bn_add(t, r->y, r->y, EC.p, 20);
+	bn_add(t, r->y, r->y, EC.p, NULL);
 	
 // t = 1/(2*py)
-	bn_copy(u, t, 20);
+	bn_copy(u, t);
 	bn_mon_inv(t, u, EC.p, EC.U, EC.V, NULL);	// +U, V, (v)
 
 // s = (3*px*px+a)/(2*py)
 	bn_mon_mul(s, s, t, EC.p, NULL);		// +aux
 	
 // rx = s*s							
-	bn_copy(u, r->x, 20);				// backup old rx now ! u = rx
+	bn_copy(u, r->x);				// backup old rx now ! u = rx
 	bn_mon_mul(r->x, s, s, EC.p, NULL);	// +aux
 
 // t = 2*px							reuse backed up value: u = rx
-	bn_add(t, u, u, EC.p, 20);			
+	bn_add(t, u, u, EC.p, NULL);			
 
 // rx = s*s - 2*px
-	bn_sub(r->x, r->x, t, EC.p, 20);		//r->x =
+	bn_sub(r->x, r->x, t, EC.p, NULL);		//r->x =
 	
 // t = -(rx-px)						reuse backed up value: u = rx
-	bn_sub(t, u, r->x, EC.p, 20);
+	bn_sub(t, u, r->x, EC.p, NULL);
 	
 // ry = -s*(rx-px)
-	bn_copy(u, r->y, 20);				// backup old ry now ! u = ry
+	bn_copy(u, r->y);				// backup old ry now ! u = ry
 	bn_mon_mul(r->y, s, t, EC.p, NULL);	// +aux
 
 // ry = -s*(rx-px) - py					reuse backed up value: u = ry
-	bn_sub(r->y, r->y, u, EC.p, 20);		//r->y =
+	bn_sub(r->y, r->y, u, EC.p, NULL);		//r->y =
 
 }	//out rx, ry
 
 void point_add(struct point *r, const struct point *q)
 {
 	if(point_is_zero(r)){
-		*r = *q;		//bn_copy(rx, qx, 20); bn_copy(ry, qy, 20);
+		*r = *q;		//bn_copy(rx, qx); bn_copy(ry, qy);
 		return; }
 
 	if(point_is_zero(q)) return;
@@ -165,16 +168,17 @@ void point_add(struct point *r, const struct point *q)
 	u8 	s[20], t[20], u[20];
 
 // u = qx-px
-	bn_sub(u, q->x, r->x, EC.p, 20);		//u32 dig, u8 c 
+	bn_sub(u, q->x, r->x, EC.p, NULL);		//u32 dig, u8 c 
 
-	if(elt_is_zero(u)){
+	if(bn_is_zero(u)){
 	// u = qy-py
-		bn_sub(u, q->y, r->y, EC.p, 20);	// subs const qy !!
+		bn_sub(u, q->y, r->y, EC.p, NULL);	// subs const qy !!
 		
-		if(elt_is_zero(u))	
+		if(bn_is_zero(u)){
 			point_double(r);
-		else	
-			bn_zero((u8 *)r, 40);
+		}else{
+			bn_zero(r->x), bn_zero(r->y);
+		}
 
 		return;
 	}
@@ -183,29 +187,29 @@ void point_add(struct point *r, const struct point *q)
 	bn_mon_inv(t, u, EC.p, EC.U, EC.V, NULL);	// +U, V, (v)
 	
 // u = qy-py
-	bn_sub(u, q->y, r->y, EC.p, 20);		// subs const qy !!
+	bn_sub(u, q->y, r->y, EC.p, NULL);		// subs const qy !!
 	
 // s = (qy-py)/(qx-px)
 	bn_mon_mul(s, t, u, EC.p, NULL);		// +aux
 	
 // rx = s*s
-	bn_copy(u, r->x, 20);				// backup old rx now ! u = rx
+	bn_copy(u, r->x);				// backup old rx now ! u = rx
 	bn_mon_mul(r->x, s, s, EC.p, NULL);	// +aux
 	
 // t = px+qx
-	bn_add(t, u, q->x, EC.p, 20);		// adds const qx !!
+	bn_add(t, u, q->x, EC.p, NULL);		// adds const qx !!
 // rx = s*s - (px+qx)
-	bn_sub(r->x, r->x, t, EC.p, 20);
+	bn_sub(r->x, r->x, t, EC.p, NULL);
 
 // t = -(rx-px)						reuse backed up value: u = rx
-	bn_sub(t, u, r->x, EC.p, 20);
+	bn_sub(t, u, r->x, EC.p, NULL);
 	
 // ry = -s*(rx-px)
-	bn_copy(u, r->y, 20);				// backup old ry now ! u = ry
+	bn_copy(u, r->y);				// backup old ry now ! u = ry
 	bn_mon_mul(r->y, s, t, EC.p, NULL);	// +aux
 	
 // ry = -s*(rx-px) - py					reuse backed up value: u = ry
-	bn_sub(r->y, r->y, u, EC.p, 20);
+	bn_sub(r->y, r->y, u, EC.p, NULL);
 }	//out rx, ry
 
 /*
@@ -214,50 +218,52 @@ void point_add(struct point *r, const struct point *q)
 void point_mul(struct point *d, const u8 *k, const struct point *b)
 {
 	u8 mask;
-	bn_zero((u8 *)d, 40);
+	bn_zero(d->x);
+	bn_zero(d->y);
 
 	for(u8 i = 0; i < 21; i++)
 		for(mask = 0x80; mask != 0; mask >>= 1){
 			point_double(d);
-			if((k[i] & mask) != 0)
-				point_add(d, b);
+			if((k[i] & mask) != 0) point_add(d, b);
 		}
 }
 
 void point_to_mon(struct point *p){
-	bn_to_mon(p->x, EC.p, 20);
-	bn_to_mon(p->y, EC.p, 20);
+	bn_to_mon(p->x, EC.p);
+	bn_to_mon(p->y, EC.p);
 }
 
 void point_from_mon(struct point *p){
-	bn_from_mon(p->x, EC.p, 20);
-	bn_from_mon(p->y, EC.p, 20);
+	bn_from_mon(p->x, EC.p);
+	bn_from_mon(p->y, EC.p);
 }
 
-/* precompute once u8 U[20] and V[20] needed in bn_mon_inv */
+/*	
+	precompute once u8 U[20] and V[20] on host, needed in bn_mon_inv 
+*/
 void precompute(u8 *U, u8 *V, const u8 *N){
 	u32 dig;
 	u8 d[20], c;
 	
 	/* precompute U */
-	bn_zero(d, 20);	d[20-1] = 2;
+	bn_zero(d); d[20-1] = 2;
 
-	c = 1; for(u8 i = 20 - 1; i < 20; i--){ dig = N[i] + 255 - d[i] + c; c = dig >> 8; U[i] = dig; }	//-	bn_sub_1(U, N, t, n);
+	c = 1; for(u8 i = LEN -1; i < LEN; i--){ dig = N[i] + 255 - d[i] + c; c = dig >> 8; U[i] = dig; }	//-	bn_sub_1(U, N, t, n);
 
 	/* precompute V */
-	bn_zero(d, 20);	d[20-1] = 1;
+	bn_zero(d); d[20-1] = 1;
 	
-	for(u8 i = 0; i < 8 *20; i++){
-		c = 0; for(u8 i = 20 - 1; i < 20; i--){ dig = d[i] + d[i] + c; c = dig >> 8; d[i] = dig; }				//-	c = bn_add_1(d, d, d, 20);
+	for(u8 i = 0; i < 8 *LEN; i++){
+		c = 0; for(u8 i = LEN -1; i < LEN; i--){ dig = d[i] + d[i] + c; c = dig >> 8; d[i] = dig; }			//-	c = bn_add_1(d, d, d, 20);
 		if(c){	
-			c = 1; for(u8 i = 20 - 1; i < 20; i--){ dig = d[i] + 255 - N[i] + c; c = dig >> 8; d[i] = dig; }	//-	bn_sub_1(d, d, N, n);
+			c = 1; for(u8 i = LEN -1; i < LEN; i--){ dig = d[i] + 255 - N[i] + c; c = dig >> 8; d[i] = dig; }	//-	bn_sub_1(d, d, N, n);
 		}
 
-		if(bn_compare(d, N, 20) >= 0){
-			c = 1; for(u8 i = 20 - 1; i < 20; i--){ dig = d[i] + 255 - N[i] + c; c = dig >> 8; d[i] = dig; }	//-	bn_sub_1(d, d, N, n);
+		if(bn_compare(d, N) >= 0){
+			c = 1; for(u8 i = LEN -1; i < LEN; i--){ dig = d[i] + 255 - N[i] + c; c = dig >> 8; d[i] = dig; }	//-	bn_sub_1(d, d, N, n);
 		}
 	}
-	bn_copy(V, d, 20);
+	bn_copy(V, d);
 }
 
 int main(int argc, char *argv[])
@@ -330,14 +336,15 @@ int main(int argc, char *argv[])
 	}
 	/*
 		precompute u8 U[20], per_curve_constant: bn_sub_1(U, N, t, n)
-		to use in bn_mon_inv, put in _constant as EC and inv256[0x80] 	
+		and V[20] to later use in bn_mon_inv, put in _constant as EC
+		and inv256 	
 	*/
 	t = NULL;
 	precompute(EC.U, EC.V, EC.p);
 	
 	// after this preparation domain_parameters remains constant!
-	bn_to_mon(EC.a, EC.p, 20);
-	bn_to_mon(EC.b, EC.p, 20);	//b used here
+	bn_to_mon(EC.a, EC.p);
+	bn_to_mon(EC.b, EC.p);	//b used here
 	point_to_mon(&EC.G);
 /*
 	printf("data:\t%db %d\n", sizeof (struct data), (sizeof (struct data) %16 == 0));

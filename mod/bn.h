@@ -9,14 +9,16 @@
    ocl: we need to pass an auxiliary local_ctx across calls
    u32 dig, u8 c, d[20];
    u8 s[20], t[20], u[20];
-
+     
    bn_add, bn_sub,		dig, c
    bn_mon_mul			dig, c, d[20]
-   bn_mon_inv			t-v, u-z
+   bn_mon_inv			dig, c, d[20], v
 */
 
 typedef unsigned char u8;
 typedef unsigned int u32;
+
+#define LEN 20		// fix bitlen / sizeof(u8)
 
 struct local {
 	u8 d[20];
@@ -24,33 +26,33 @@ struct local {
 	u32 dig;
 };
 
-static int elt_is_zero(const u8 *d){
-	for(u8 i = 0; i < 20; i++)
+static int bn_is_zero(const u8 *d){
+	for(u8 i = 0; i < LEN; i++)
 		if (d[i] != 0) return 0;
 
 	return 1;
 }
 
 /* a _kernel user_zerofill sample */
-static void bn_zero(u8 *d, const u32 n){
-	for(u8 i = 0; i < n; i++) d[i] = 0;
+static void bn_zero(u8 *d){
+	for(u8 i = 0; i < LEN; i++) d[i] = 0;
 }
 
 /* a _kernel user_memcpy sample */
-static void bn_copy(u8 *d, const u8 *a, const u32 n){
-	for(u8 i = 0; i < n; i++) d[i] = a[i];
+static void bn_copy(u8 *d, const u8 *a){
+	for(u8 i = 0; i < LEN; i++) d[i] = a[i];
 }
 
 /* a _kernel user_memcmp sample */
-static int bn_compare(const u8 *a, const u8 *b, const u32 n){
-	for(u8 i = 0; i < n; i++){
+static int bn_compare(const u8 *a, const u8 *b){
+	for(u8 i = 0; i < LEN; i++){
 		if(a[i] < b[i]) return -1;
 		if(a[i] > b[i]) return 1;
 	}
 	return 0;
 }
 
-void bn_print(const char *name, const u8 *a, const u32 n){
+static void bn_print(const char *name, const u8 *a, const u32 n){
 	if(name) printf("%s:\t", name);
 	for(u32 i = 0; i < n; i++) printf("%02x", a[i]);
 	printf("\n");
@@ -60,18 +62,18 @@ static void bn_add(
 	u8 *d,				//io
 	const u8 *a, 
 	const u8 *b,			//in point_add is also qx
-	const u8 *N,			//mod N
-	const u32 n)			//unused
+	const u8 *N,			//mod
+	struct local *aux)		//unused
 {
-	u32 dig; u8 c;			//needs aux_local, aux.d[20] unused
+	u32 dig; u8 c;			//needs aux_local, aux.d[LEN] unused
 	
-	c = 0; for(u8 i = 20 - 1; i < 20; i--){ dig = a[i] + b[i] + c; c = dig >> 8; d[i] = dig; }				//-	c = bn_add_1(d, a, b, n);
+	c = 0; for(u8 i = LEN -1; i < LEN; i--){ dig = a[i] + b[i] + c; c = dig >> 8; d[i] = dig; }				//-	c = bn_add_1(d, a, b, n);
 	if(c){
-		c = 1; for(u8 i = 20 - 1; i < 20; i--){ dig = d[i] + 255 - N[i] + c; c = dig >> 8; d[i] = dig; }	//-	bn_sub_1(d, d, N, n);
+		c = 1; for(u8 i = LEN -1; i < LEN; i--){ dig = d[i] + 255 - N[i] + c; c = dig >> 8; d[i] = dig; }	//-	bn_sub_1(d, d, N, n);
 	}
 	
-	if(bn_compare(d, N, 20) >= 0){																//-	bn_reduce(d, N, n);	
-		c = 1; for(u8 i = 20 - 1; i < 20; i--){ dig = d[i] + 255 - N[i] + c; c = dig >> 8; d[i] = dig; }	//-	bn_sub_1(d, d, N, n);
+	if(bn_compare(d, N) >= 0){																//-	bn_reduce(d, N, n);	
+		c = 1; for(u8 i = LEN -1; i < LEN; i--){ dig = d[i] + 255 - N[i] + c; c = dig >> 8; d[i] = dig; }	//-	bn_sub_1(d, d, N, n);
 	}
 }
 
@@ -79,15 +81,15 @@ static void bn_sub(
 	u8 *d,				//io
 	const u8 *a,			//in point_add is also qx, qy 
 	const u8 *b,
-	const u8 *N,			//mod N
-	const u32 n)			//unused
+	const u8 *N,			//mod
+	struct local *aux)		//unused
 {
 	u32 dig; u8 c;			//needs aux_local, aux.d[20] unused
 	
-	c = 1; for(u8 i = 20 - 1; i < 20; i--){ dig = a[i] + 255 - b[i] + c; c = dig >> 8; d[i] = dig; }		//-	c = bn_sub_1(d, a, b, n);
+	c = 1; for(u8 i = LEN -1; i < LEN; i--){ dig = a[i] + 255 - b[i] + c; c = dig >> 8; d[i] = dig; }		//-	c = bn_sub_1(d, a, b, n);
 	c = 1 - c;
 	if(c){
-		c = 0; for(u8 i = 20 - 1; i < 20; i--){ dig = d[i] + N[i] + c;	c = dig >> 8; d[i] = dig; }			//-	bn_add_1(d, d, N, n);
+		c = 0; for(u8 i = LEN -1; i < LEN; i--){ dig = d[i] + N[i] + c;	c = dig >> 8; d[i] = dig; }			//-	bn_add_1(d, d, N, n);
 	}
 }
 
@@ -111,33 +113,34 @@ static const u8 inv256[0x80] = {
 	0x11, 0x3b, 0x5d, 0xc7, 0x49, 0x33, 0x55, 0xff,
 };
 
-static void bn_mon_mul(u8 *io, const u8 *a, const u8 *b, 
-	const u8 *N,
+static void bn_mon_mul(u8 *io,
+	const u8 *a,
+	const u8 *b, 
+	const u8 *N,				//mod
 	struct local *aux_local		// HI _loc_priority
 //	u8 d[20], c; u32 dig;		// 20 + 1 + 4 = 25b
 ){
-/* temp array to operate on, f.scope, has the highest priority on operation */
-	u8 d[20], c;	u32 dig;		//d has HI _loc_priority
-
-	bn_zero(d, 20);
-
-	const u32 n = 20;				// fix n = bitlen / u8	
-	for(u8 i = n-1; i < n; i--){		
-		c =   -(d[n-1] + a[n-1] *b[i]) * inv256[N[n-1] /2];
-		dig = d[n-1] + a[n-1] *b[i] + N[n-1] *c; dig >>= 8;
+	u8 d[20], c;		//needs a temp buffer !!
+	u32 dig;
 	
-		for(u8 j = 20 - 2; j < 20; j--){ dig += d[j] + a[j] *b[i] + N[j] *c; d[j+1] = dig; dig >>= 8; }	
+	bn_zero(d);
+
+	for(u8 i = LEN -1; i < LEN; i--){		
+		c =   -(d[LEN -1] + a[LEN -1] *b[i]) * inv256[N[LEN -1] /2];
+		dig = d[LEN -1] + a[LEN -1] *b[i] + N[LEN -1] *c; dig >>= 8;
+	
+		for(u8 j = LEN -2; j < LEN; j--){ dig += d[j] + a[j] *b[i] + N[j] *c; d[j+1] = dig; dig >>= 8; }	
 		d[0] = dig; dig >>= 8;
 	
 		if(dig){
-			c = 1; for(u8 i = 20 - 1; i < 20; i--){ dig = d[i] + 255 - N[i] + c; c = dig >> 8; d[i] = dig; }	//-	bn_sub_1(d, d, N, n);
+			c = 1; for(u8 i = LEN -1; i < LEN; i--){ dig = d[i] + 255 - N[i] + c; c = dig >> 8; d[i] = dig; }	//-	bn_sub_1(d, d, N, n);
 		}
 
-		if(bn_compare(d, N, 20) >= 0) {																//-	bn_reduce(d, N, 20);
-			c = 1; for(u8 i = 20 - 1; i < 20; i--){ dig = d[i] + 255 - N[i] + c; c = dig >> 8; d[i] = dig; }	//-	bn_sub_1(d, d, N, n);
+		if(bn_compare(d, N) >= 0) {																					//-	bn_reduce(d, N, 20);
+			c = 1; for(u8 i = LEN -1; i < LEN; i--){ dig = d[i] + 255 - N[i] + c; c = dig >> 8; d[i] = dig; }	//-	bn_sub_1(d, d, N, n);
 		}
 	}
-	bn_copy(io, d, 20);
+	bn_copy(io, d);
 }
 
 static void bn_mon_inv(u8 *d,	// d = 1/a mod N
@@ -145,7 +148,7 @@ static void bn_mon_inv(u8 *d,	// d = 1/a mod N
 	const u8 *N,
 	const u8 *U,				// precomputed per_curve_constant
 	const u8 *V,				// precomputed per_curve_constant
-	struct local *aux_local		// u8 d[20], c; u32 dig;
+	struct local *aux			// u8 d[20], c; u32 dig;
 ){
 /*!!	now prepare d[20]: use dig, c
 	bn_zero(d, 20);	d[20-1] = 1;
@@ -156,44 +159,44 @@ static void bn_mon_inv(u8 *d,	// d = 1/a mod N
 			c = 1; for(u8 i = 20 - 1; i < 20; i--){ dig = d[i] + 255 - N[i] + c; c = dig >> 8; d[i] = dig; }	//-	bn_sub_1(d, d, N, n);
 		}
 
-		if(bn_compare(d, N, 20) >= 0){
+		if(bn_compare(d, N) >= 0){
 			c = 1; for(u8 i = 20 - 1; i < 20; i--){ dig = d[i] + 255 - N[i] + c; c = dig >> 8; d[i] = dig; }	//-	bn_sub_1(d, d, N, n);
 		}
 	}
 	bn_print("d", d, 20);
 */	
-	bn_copy(d, V, 20);			//1 copy from _const to loc shall be: v = V in advance
+	bn_copy(d, V);			//1 copy from _const to loc shall be: v = V in advance
 
 /*	now do stuff with: d, v, use also U, a		
 	as seen below, v can starts initialized per_curve_constant, 
-	saving a bn_mun_mul
+	saving a bn_mon_mul
 */	u8 v[20];
 
-	for(u8 i = 0; i < 20; i++){
+	for(u8 i = 0; i < LEN; i++){
 		for(u8 mask = 0x80; mask != 0; mask >>= 1){
-			bn_mon_mul(v, d, d, N, NULL);		// +aux, first round can be precomputed !
+			bn_mon_mul(v, d, d, N, NULL);		// +aux, v = d * d
 					
 			/* v can starts initialized per_curve_constant !!!
 			if(mask == 0x80 && i == 0) bn_print("v", v, 20);*/
 		
 /* U */		if((U[i] & mask) != 0)				// per_curve_constant	
-/* a */			bn_mon_mul(d, v, a, N, NULL);	// use now a[20]
+/* a */			bn_mon_mul(d, v, a, N, NULL);	// d = v * a
 			else
-				bn_copy(d, v, 20);
+				bn_copy(d, v);					// d = v
 		}
 	}
-}	//out d
+}	// out d
 
 /* below this: not kernel functions */
-void bn_to_mon(u8 *d, const u8 *N, const u32 n){
-	for(u8 i = 0; i < 8*n; i++)
-		bn_add(d, d, d, N, n);
+void bn_to_mon(u8 *d, const u8 *N){
+	for(u8 i = 0; i < 8 *LEN; i++)
+		bn_add(d, d, d, N, NULL);
 }
 
-void bn_from_mon(u8 *d, const u8 *N, const u32 n){
+void bn_from_mon(u8 *d, const u8 *N){
 	u8 t[512];
 
-	bn_zero(t, n);
-	t[n-1] = 1;
+	bn_zero(t);
+	t[LEN -1] = 1;
 	bn_mon_mul(d, d, t, N, NULL);	//512
 }
